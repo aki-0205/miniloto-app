@@ -1,0 +1,9 @@
+{
+  "name": "ミニロト 厳選1口予測",
+  "short_name": "ミニロト予測",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f5f5f5",
+  "theme_color": "#222222",
+  "lang": "ja"
+}
