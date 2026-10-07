@@ -1,0 +1,1805 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#111827">
+<link rel="manifest" href="manifest.json">
+<title>ミニロト 厳選1口予測</title>
+
+<style>
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;
+  margin:0;
+  background:#f3f4f6;
+  color:#111827
+}
+
+main{
+  max-width:760px;
+  margin:auto;
+  padding:18px
+}
+
+h1{
+  font-size:24px;
+  margin:0 0 8px
+}
+
+.sub{
+  color:#4b5563;
+  margin-bottom:18px
+}
+
+.card{
+  background:white;
+  border-radius:14px;
+  padding:16px;
+  margin:12px 0;
+  box-shadow:0 2px 8px #0001
+}
+
+button{
+  width:100%;
+  padding:13px;
+  border:0;
+  border-radius:10px;
+  background:#111827;
+  color:white;
+  font-size:16px;
+  font-weight:700
+}
+
+button:disabled{
+  opacity:.5
+}
+
+input[type=file]{
+  width:100%;
+  padding:10px 0
+}
+
+.status{
+  font-weight:700
+}
+
+.ticket{
+  font-size:28px;
+  font-weight:800;
+  letter-spacing:2px;
+  text-align:center;
+  padding:14px 4px
+}
+
+.small{
+  font-size:13px;
+  color:#4b5563;
+  line-height:1.55
+}
+
+.ok{
+  color:#047857
+}
+
+.warn{
+  color:#b45309
+}
+
+.err{
+  color:#b91c1c
+}
+
+table{
+  border-collapse:collapse;
+  width:100%;
+  font-size:13px
+}
+
+th,td{
+  border-bottom:1px solid #e5e7eb;
+  padding:7px 4px;
+  text-align:left
+}
+
+th{
+  background:#f9fafb
+}
+
+details{
+  margin-top:10px
+}
+
+summary{
+  font-weight:700;
+  cursor:pointer
+}
+
+.badge{
+  display:inline-block;
+  padding:3px 7px;
+  border-radius:999px;
+  background:#e5e7eb;
+  margin:2px
+}
+</style>
+</head>
+
+<body>
+
+<main>
+
+<h1>ミニロト 厳選1口予測</h1>
+
+<div class="sub">
+過去データを条件・点数で評価し、1口だけ選びます。
+</div>
+
+
+<div class="card">
+
+<b>① 過去の当選データ</b>
+
+<input id="csvFile" type="file" accept=".csv,text/csv">
+
+<div id="dataStatus" class="status">
+データ未入力
+</div>
+
+<div class="small">
+CSV形式：
+回号,抽選日,本数字1,本数字2,本数字3,本数字4,本数字5,ボーナス
+</div>
+
+</div>
+
+
+<div class="card">
+
+<b>② 厳選1口</b>
+
+<button id="calcBtn" disabled>
+厳選1口を計算
+</button>
+
+<div id="period" class="small"></div>
+
+<div id="ticket" class="ticket">
+---
+</div>
+
+<div id="reason" class="small"></div>
+
+</div>
+
+
+<div class="card">
+
+<b>③ 前回抽選との比較</b>
+
+<div id="lastCompare" class="small">
+---
+</div>
+
+</div>
+
+
+<div class="card">
+
+<b>④ 当選後の検証</b>
+
+<div class="small">
+次回のCSVを読み込んで「検証」を押すと、
+保存した予測と実際の当選結果を比較します。
+</div>
+
+<button id="verifyBtn" disabled>
+保存済み予測を検証
+</button>
+
+<div id="verifyResult"></div>
+
+</div>
+
+
+<div class="card">
+
+<b>⑤ 検証履歴</b>
+
+<div id="history"></div>
+
+</div>
+
+
+<div class="card small">
+
+<b>更新タイミング</b><br>
+
+毎週火曜日19:00を新しい予測期間の開始時刻とします。<br>
+
+このブラウザ版は、火曜日19:00を過ぎて最初にアプリを開いた時に
+新しい予測を作成し、その後は次の火曜日19:00まで同じ数字を保存します。
+
+</div>
+
+</main>
+
+
+<script>
+
+"use strict";
+
+
+const STORAGE_KEY = "miniloto_prediction_v3";
+const HISTORY_KEY = "miniloto_verification_v3";
+
+let draws = [];
+
+
+const $ = id => document.getElementById(id);
+
+
+function esc(s){
+
+  return String(s).replace(/[&<>"']/g,m=>({
+
+    "&":"&amp;",
+    "<":"&lt;",
+    ">":"&gt;",
+    '"':"&quot;",
+    "'":"&#39;"
+
+  }[m]));
+
+}
+
+
+function parseCSV(text){
+
+  text = text.replace(/^\uFEFF/,"");
+
+  const lines =
+    text
+      .split(/\r?\n/)
+      .map(x=>x.trim())
+      .filter(Boolean);
+
+  const out=[];
+
+
+  for(const line of lines){
+
+    const c =
+      line
+        .split(",")
+        .map(x=>x.trim().replace(/^"|"$/g,""));
+
+
+    const nums =
+      c.slice(2,7).map(Number);
+
+
+    if(
+      nums.length===5 &&
+      nums.every(
+        n=>Number.isInteger(n)&&n>=1&&n<=31
+      )
+    ){
+
+      const bonus=Number(c[7]);
+
+      out.push({
+
+        round:Number(c[0])||0,
+
+        date:c[1]||"",
+
+        numbers:
+          nums.sort((a,b)=>a-b),
+
+        bonus:
+          Number.isInteger(bonus)&&
+          bonus>=1&&
+          bonus<=31
+          ? bonus
+          : null
+
+      });
+
+    }
+
+  }
+
+
+  out.sort((a,b)=>b.round-a.round);
+
+  return out;
+
+}
+
+
+function frequency(ds,limit){
+
+  const f=Array(32).fill(0);
+
+  ds
+    .slice(0,limit)
+    .forEach(
+      d=>d.numbers.forEach(n=>f[n]++)
+    );
+
+  return f;
+
+}
+
+
+function bonusFrequency(ds,limit){
+
+  const f=Array(32).fill(0);
+
+  ds
+    .slice(0,limit)
+    .forEach(d=>{
+      if(d.bonus) f[d.bonus]++;
+    });
+
+  return f;
+
+}
+
+
+function drawsSinceSeen(ds,n){
+
+  for(let i=0;i<ds.length;i++){
+
+    if(ds[i].numbers.includes(n))
+      return i;
+
+  }
+
+  return ds.length;
+
+}
+
+
+function previousOverlap(c,prev){
+
+  return c.filter(n=>prev.includes(n)).length;
+
+}
+
+
+function slideCount(c,prev){
+
+  return c.filter(
+    n=>prev.some(
+      p=>Math.abs(n-p)===1
+    )
+  ).length;
+
+}
+
+
+function consecutiveGroups(c){
+
+  let groups=0;
+
+  for(let i=1;i<c.length;i++){
+
+    if(c[i]===c[i-1]+1)
+      groups++;
+
+  }
+
+  return groups;
+
+}
+
+
+function maxConsecutiveRun(c){
+
+  let max=1;
+  let run=1;
+
+  for(let i=1;i<c.length;i++){
+
+    if(c[i]===c[i-1]+1){
+
+      run++;
+
+      max=Math.max(max,run);
+
+    }else{
+
+      run=1;
+
+    }
+
+  }
+
+  return max;
+
+}
+
+
+function maxSameParityRun(c){
+
+  let max=1;
+  let run=1;
+
+  for(let i=1;i<c.length;i++){
+
+    if(c[i]%2===c[i-1]%2){
+
+      run++;
+
+      max=Math.max(max,run);
+
+    }else{
+
+      run=1;
+
+    }
+
+  }
+
+  return max;
+
+}
+
+
+function maxSameLastDigit(c){
+
+  const f={};
+
+  c.forEach(n=>{
+
+    const k=n%10;
+
+    f[k]=(f[k]||0)+1;
+
+  });
+
+  return Math.max(...Object.values(f));
+
+}
+
+
+function maxBand(c){
+
+  const f=[0,0,0,0];
+
+  c.forEach(n=>{
+
+    if(n<=9)
+      f[0]++;
+
+    else if(n<=19)
+      f[1]++;
+
+    else if(n<=29)
+      f[2]++;
+
+    else
+      f[3]++;
+
+  });
+
+  return Math.max(...f);
+
+}
+
+
+function zoneCount(c){
+
+  const z=new Set(
+
+    c.map(
+
+      n=>
+        n<=7 ? 0 :
+        n<=14 ? 1 :
+        n<=21 ? 2 :
+        n<=28 ? 3 :
+        4
+
+    )
+
+  );
+
+  return z.size;
+
+}
+
+
+function gapInfo(c){
+
+  const gaps=[];
+
+  for(let i=1;i<c.length;i++)
+    gaps.push(c[i]-c[i-1]);
+
+  return {
+
+    gaps,
+
+    min:Math.min(...gaps),
+
+    max:Math.max(...gaps),
+
+    close:gaps.filter(g=>g<=2).length
+
+  };
+
+}
+
+
+function mean(a){
+
+  return a.reduce((x,y)=>x+y,0)/a.length;
+
+}
+
+
+function std(a){
+
+  const m=mean(a);
+
+  return Math.sqrt(
+    mean(
+      a.map(x=>(x-m)**2)
+    )
+  )||1;
+
+}
+
+
+function historicalSums(ds){
+
+  return ds.map(
+    d=>d.numbers.reduce((a,b)=>a+b,0)
+  );
+
+}
+
+
+function scoreCandidate(c,ds,prev){
+
+  const f10=frequency(ds,10);
+
+  const f20=frequency(ds,20);
+
+  const bf20=bonusFrequency(ds,20);
+
+  const cold=
+    c.filter(
+      n=>drawsSinceSeen(ds,n)>=15
+    ).length;
+
+  const pull=
+    previousOverlap(c,prev);
+
+  const slide=
+    slideCount(c,prev);
+
+  const sum=
+    c.reduce((a,b)=>a+b,0);
+
+  const odd=
+    c.filter(n=>n%2).length;
+
+  const low=
+    c.filter(n=>n<=15).length;
+
+  const zones=
+    zoneCount(c);
+
+  const sums=
+    historicalSums(ds);
+
+  const sm=
+    mean(sums);
+
+  const ss=
+    std(sums);
+
+  const sumZ=
+    Math.abs(sum-sm)/ss;
+
+  const sumLast=
+    sum%10;
+
+  const sumLastFreq=
+    Array(10).fill(0);
+
+  sums
+    .slice(0,100)
+    .forEach(
+      s=>sumLastFreq[s%10]++
+    );
+
+  const minSL=
+    Math.min(...sumLastFreq);
+
+  const gap=
+    gapInfo(c);
+
+
+  let score=0;
+
+
+  // 最近の出現頻度
+  c.forEach(n=>{
+
+    score +=
+      f10[n]*3 +
+      f20[n]*1.5;
+
+    // 過去20回のボーナス数字
+    if(bf20[n]>0)
+      score += Math.min(3,bf20[n]);
+
+  });
+
+
+  // 15回以上出ていない数字
+  if(cold===1)
+    score+=15;
+
+  else if(cold===2)
+    score+=7;
+
+  else if(cold>=3)
+    score-=3*cold;
+
+
+  // 前回数字の引き継ぎ
+  if(pull===1)
+    score+=16;
+
+  else if(pull===2)
+    score+=11;
+
+
+  // 前回数字から±1スライド
+  if(slide===1)
+    score+=14;
+
+  else if(slide===2)
+    score+=7;
+
+  else if(slide>=3)
+    score-=5;
+
+
+  // 奇数偶数
+  if(odd===2||odd===3)
+    score+=8;
+
+
+  // 低数字・高数字
+  if(low===2||low===3)
+    score+=8;
+
+
+  // 数字区分
+  if(zones===5)
+    score+=8;
+
+  else if(zones===4)
+    score+=6;
+
+  else if(zones===3)
+    score+=3;
+
+
+  // 合計
+  if(sum>=60&&sum<=95)
+    score+=10;
+
+  else if(sum>=50&&sum<=105)
+    score+=5;
+
+
+  // 合計の下一桁
+  if(sumLastFreq[sumLast]===minSL)
+    score+=5;
+
+
+  // 過去平均からの距離
+  if(sumZ<=0.75)
+    score+=7;
+
+  else if(sumZ<=1.25)
+    score+=4;
+
+  else if(sumZ>2)
+    score-=8;
+
+
+  // 連番
+  if(consecutiveGroups(c)===1)
+    score+=15;
+
+
+  // 数字間隔
+  if(gap.close<=1)
+    score+=5;
+
+  else if(gap.close>=3)
+    score-=4;
+
+
+  if(gap.max<=12)
+    score+=3;
+
+
+  return {
+
+    score,
+    cold,
+    pull,
+    slide,
+    sum,
+    odd,
+    low,
+    zones,
+
+    consecutive:
+      consecutiveGroups(c),
+
+    maxRun:
+      maxConsecutiveRun(c),
+
+    parityRun:
+      maxSameParityRun(c),
+
+    lastDigit:
+      maxSameLastDigit(c),
+
+    band:
+      maxBand(c),
+
+    gap
+
+  };
+
+}
+
+
+function overlap(a,b){
+
+  return a.filter(
+    n=>b.includes(n)
+  ).length;
+
+}
+
+
+function validCandidate(c,ds,prev){
+
+  const s=
+    scoreCandidate(c,ds,prev);
+
+
+  return (
+
+    // 合計
+    s.sum>=50 &&
+    s.sum<=105 &&
+
+    // 奇数偶数
+    (s.odd===2||s.odd===3) &&
+
+    // 低高
+    (s.low===2||s.low===3) &&
+
+    // 5区分
+    s.zones>=3 &&
+
+    // 3連番禁止
+    s.maxRun<=2 &&
+
+    // 奇偶3連続禁止
+    s.parityRun<=2 &&
+
+    // 同じ下一桁3個以上禁止
+    s.lastDigit<=2 &&
+
+    // 同じ数字帯4個以上禁止
+    s.band<=3 &&
+
+    // 連番は1組
+    s.consecutive===1 &&
+
+    // 前回数字は1～2個
+    s.pull>=1 &&
+    s.pull<=2 &&
+
+    // スライド1個以上
+    s.slide>=1 &&
+
+    // 15回以上未出現数字を1個以上
+    s.cold>=1 &&
+
+    // 前回数字3個以上は除外
+    previousOverlap(c,prev)<=2 &&
+
+    // 過去当選組と4個以上一致を除外
+    !ds.some(
+      d=>overlap(c,d.numbers)>=4
+    )
+
+  );
+
+}
+
+
+function lexicographic(a,b){
+
+  for(let i=0;i<a.length;i++){
+
+    if(a[i]!==b[i])
+      return a[i]-b[i];
+
+  }
+
+  return 0;
+
+}
+
+
+function makeCandidate(ds){
+
+  const prev=
+    ds[0].numbers;
+
+  let best=null;
+  let bestInfo=null;
+
+
+  // ミニロト全169,911通り
+  for(let a=1;a<=27;a++){
+
+    for(let b=a+1;b<=28;b++){
+
+      for(let c=b+1;c<=29;c++){
+
+        for(let d=c+1;d<=30;d++){
+
+          for(let e=d+1;e<=31;e++){
+
+            const arr=[
+              a,b,c,d,e
+            ];
+
+
+            if(
+              !validCandidate(
+                arr,ds,prev
+              )
+            )
+              continue;
+
+
+            const info=
+              scoreCandidate(
+                arr,ds,prev
+              );
+
+
+            if(
+              !best ||
+
+              info.score>bestInfo.score ||
+
+              (
+                info.score===bestInfo.score &&
+                lexicographic(
+                  arr,best
+                )<0
+              )
+            ){
+
+              best=arr;
+              bestInfo=info;
+
+            }
+
+          }
+
+        }
+
+      }
+
+    }
+
+  }
+
+
+  if(best){
+
+    return {
+
+      numbers:best,
+      info:bestInfo,
+      relaxed:false
+
+    };
+
+  }
+
+
+  // 厳格条件で候補がない場合の安全策
+  let pool=[];
+
+
+  for(let a=1;a<=27;a++)
+  for(let b=a+1;b<=28;b++)
+  for(let c=b+1;c<=29;c++)
+  for(let d=c+1;d<=30;d++)
+  for(let e=d+1;e<=31;e++){
+
+    const arr=[
+      a,b,c,d,e
+    ];
+
+    const info=
+      scoreCandidate(
+        arr,ds,prev
+      );
+
+
+    if(
+
+      info.sum>=50 &&
+      info.sum<=105 &&
+
+      info.odd>=2 &&
+      info.odd<=3 &&
+
+      info.low>=2 &&
+      info.low<=3 &&
+
+      info.zones>=3 &&
+
+      info.maxRun<=2 &&
+
+      info.parityRun<=2 &&
+
+      info.lastDigit<=2 &&
+
+      info.band<=3
+
+    ){
+
+      pool.push({
+        numbers:arr,
+        info
+      });
+
+    }
+
+  }
+
+
+  pool.sort(
+
+    (x,y)=>
+      y.info.score-x.info.score ||
+      lexicographic(
+        x.numbers,
+        y.numbers
+      )
+
+  );
+
+
+  return pool[0]
+    ? {
+        ...pool[0],
+        relaxed:true
+      }
+    : null;
+
+}
+
+
+function jstParts(){
+
+  const parts=
+    new Intl.DateTimeFormat(
+      "ja-JP",
+      {
+        timeZone:"Asia/Tokyo",
+        year:"numeric",
+        month:"2-digit",
+        day:"2-digit",
+        weekday:"short",
+        hour:"2-digit",
+        minute:"2-digit",
+        second:"2-digit",
+        hourCycle:"h23"
+      }
+    ).formatToParts(
+      new Date()
+    );
+
+
+  const o={};
+
+  parts.forEach(
+    p=>o[p.type]=p.value
+  );
+
+  return o;
+
+}
+
+
+function periodKey(){
+
+  const p=
+    jstParts();
+
+
+  const dateUTC=
+    new Date(
+      Date.UTC(
+        +p.year,
+        +p.month-1,
+        +p.day
+      )
+    );
+
+
+  // 日0 月1 火2 水3 木4 金5 土6
+  const dow=
+    dateUTC.getUTCDay();
+
+
+  let diff=
+    (dow-2+7)%7;
+
+
+  // 火曜日19時より前なら前週の火曜日
+  if(
+    dow===2 &&
+    +p.hour<19
+  )
+    diff=7;
+
+
+  dateUTC.setUTCDate(
+    dateUTC.getUTCDate()-diff
+  );
+
+
+  return
+    dateUTC
+      .toISOString()
+      .slice(0,10)
+    +"-19";
+
+}
+
+
+function formatTicket(nums){
+
+  return nums.join("・");
+
+}
+
+
+function loadState(){
+
+  try{
+
+    return JSON.parse(
+      localStorage.getItem(
+        STORAGE_KEY
+      )||"null"
+    );
+
+  }catch{
+
+    return null;
+
+  }
+
+}
+
+
+function saveState(s){
+
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify(s)
+  );
+
+}
+
+
+function loadHistory(){
+
+  try{
+
+    return JSON.parse(
+      localStorage.getItem(
+        HISTORY_KEY
+      )||"[]"
+    );
+
+  }catch{
+
+    return [];
+
+  }
+
+}
+
+
+function saveHistory(h){
+
+  localStorage.setItem(
+    HISTORY_KEY,
+    JSON.stringify(
+      h.slice(-100)
+    )
+  );
+
+}
+
+
+function renderHistory(){
+
+  const h=
+    loadHistory();
+
+
+  if(!h.length){
+
+    $("history").innerHTML=
+      '<div class="small">まだ検証履歴はありません。</div>';
+
+    return;
+
+  }
+
+
+  $("history").innerHTML=
+
+    "<table>" +
+
+    "<tr>" +
+    "<th>期間</th>" +
+    "<th>予測</th>" +
+    "<th>的中</th>" +
+    "<th>当選</th>" +
+    "<th>原因メモ</th>" +
+    "</tr>" +
+
+    h
+      .slice()
+      .reverse()
+      .map(x=>
+
+        `<tr>
+          <td>${esc(x.period)}</td>
+          <td>${esc(formatTicket(x.prediction))}</td>
+          <td>${x.hits}個</td>
+          <td>${esc(formatTicket(x.actual))}</td>
+          <td>${esc(x.summary)}</td>
+        </tr>`
+
+      )
+      .join("") +
+
+    "</table>";
+
+}
+
+
+function renderTicket(){
+
+  const st=
+    loadState();
+
+
+  if(
+    !st ||
+    !st.prediction
+  ){
+
+    $("ticket").textContent="---";
+
+    return;
+
+  }
+
+
+  $("ticket").textContent=
+    formatTicket(
+      st.prediction
+    );
+
+
+  $("period").textContent=
+    "予測期間："+st.period;
+
+
+  $("reason").innerHTML=
+
+    `予測時スコア：${st.score.toFixed(1)}　
+     前回引継ぎ：${st.info.pull}個　
+     スライド：${st.info.slide}個　
+     連番：${st.info.consecutive}組　
+     冷数字15回以上未出現：${st.info.cold}個　
+     合計：${st.info.sum}` +
+
+    (
+
+      st.relaxed
+
+      ? '<br><span class="warn">※厳格条件で候補がなかったため、一部条件を緩和しています。</span>'
+
+      : ""
+
+    );
+
+}
+
+
+function renderLastCompare(){
+
+  if(!draws.length){
+
+    $("lastCompare").textContent="---";
+
+    return;
+
+  }
+
+
+  const st=
+    loadState();
+
+
+  const prev=
+    draws[0].numbers;
+
+
+  if(
+    !st ||
+    !st.prediction
+  ){
+
+    $("lastCompare").textContent=
+      "前回当選："+formatTicket(prev);
+
+    return;
+
+  }
+
+
+  const p=
+    st.prediction;
+
+
+  const pull=
+    previousOverlap(
+      p,prev
+    );
+
+
+  const slide=
+    slideCount(
+      p,prev
+    );
+
+
+  $("lastCompare").innerHTML=
+
+    `前回当選：
+     <b>${formatTicket(prev)}</b><br>` +
+
+    `今回予測：
+     <b>${formatTicket(p)}</b><br>` +
+
+    `引き継ぎ：${pull}個　
+     スライド：${slide}個`;
+
+}
+
+
+function analyzeActual(
+  actual,
+  pred,
+  period
+){
+
+  const hits=
+    overlap(
+      pred,
+      actual
+    );
+
+
+  const prev=
+    draws.length>1
+      ? draws[1].numbers
+      : null;
+
+
+  const info={
+
+    hits,
+
+    carry:
+      prev
+      ? overlap(actual,prev)
+      : null,
+
+    slide:
+      prev
+      ? slideCount(actual,prev)
+      : null,
+
+    consecutive:
+      consecutiveGroups(actual),
+
+    sum:
+      actual.reduce(
+        (a,b)=>a+b,0
+      ),
+
+    odd:
+      actual.filter(
+        n=>n%2
+      ).length,
+
+    low:
+      actual.filter(
+        n=>n<=15
+      ).length,
+
+    zones:
+      zoneCount(actual),
+
+    predictionCarry:
+      prev
+      ? overlap(pred,prev)
+      : null,
+
+    predictionSlide:
+      prev
+      ? slideCount(pred,prev)
+      : null
+
+  };
+
+
+  const reasons=[];
+
+
+  if(hits===0)
+
+    reasons.push(
+      "予測数字と重ならなかった"
+    );
+
+  else
+
+    reasons.push(
+      `予測数字が${hits}個的中`
+    );
+
+
+  if(prev){
+
+    if(info.carry>=1)
+
+      reasons.push(
+        `前回から${info.carry}個引継ぎ`
+      );
+
+    else
+
+      reasons.push(
+        "前回数字の引継ぎなし"
+      );
+
+
+    if(info.slide>=1)
+
+      reasons.push(
+        `前回からスライド${info.slide}個`
+      );
+
+    else
+
+      reasons.push(
+        "スライドなし"
+      );
+
+  }
+
+
+  if(info.consecutive===1)
+
+    reasons.push(
+      "連番1組"
+    );
+
+  else if(info.consecutive===0)
+
+    reasons.push(
+      "連番なし"
+    );
+
+  else
+
+    reasons.push(
+      `連番${info.consecutive}組`
+    );
+
+
+  return {
+
+    period,
+
+    actual,
+
+    prediction:pred,
+
+    hits,
+
+    info,
+
+    summary:
+      reasons.join(" / "),
+
+    date:
+      new Date().toISOString()
+
+  };
+
+}
+
+
+function verify(){
+
+  if(draws.length<2){
+
+    $("verifyResult").innerHTML=
+      '<p class="err">検証には少なくとも2回分のデータが必要です。</p>';
+
+    return;
+
+  }
+
+
+  const st=
+    loadState();
+
+
+  if(
+    !st ||
+    !st.prediction
+  ){
+
+    $("verifyResult").innerHTML=
+      '<p class="err">保存された予測がありません。</p>';
+
+    return;
+
+  }
+
+
+  const predictedPeriod=
+    st.period;
+
+
+  const latest=
+    draws[0];
+
+
+  if(
+    latest.round===st.sourceRound
+  ){
+
+    $("verifyResult").innerHTML=
+
+      '<p class="warn">予測を作った時点と同じ最新回です。次回当選結果のCSVを読み込んでください。</p>';
+
+    return;
+
+  }
+
+
+  const actual=
+    draws.find(
+      d=>d.round>st.sourceRound
+    ) || latest;
+
+
+  if(!actual){
+
+    $("verifyResult").innerHTML=
+      '<p class="err">予測後の当選回が見つかりません。</p>';
+
+    return;
+
+  }
+
+
+  const already=
+    loadHistory()
+      .some(
+        x=>x.period===predictedPeriod
+      );
+
+
+  if(already){
+
+    $("verifyResult").innerHTML=
+      '<p class="warn">この予測期間はすでに検証済みです。</p>';
+
+    renderHistory();
+
+    return;
+
+  }
+
+
+  const result=
+    analyzeActual(
+      actual.numbers,
+      st.prediction,
+      predictedPeriod
+    );
+
+
+  const h=
+    loadHistory();
+
+
+  h.push(result);
+
+  saveHistory(h);
+
+
+  $("verifyResult").innerHTML=
+
+    `<table>
+
+      <tr>
+        <th>予測</th>
+        <td>${formatTicket(st.prediction)}</td>
+      </tr>
+
+      <tr>
+        <th>実際</th>
+        <td>${formatTicket(actual.numbers)}</td>
+      </tr>
+
+      <tr>
+        <th>的中</th>
+        <td><b>${result.hits}個</b></td>
+      </tr>
+
+      <tr>
+        <th>前回から引継ぎ</th>
+        <td>${result.info.carry??"-"}個</td>
+      </tr>
+
+      <tr>
+        <th>スライド</th>
+        <td>${result.info.slide??"-"}個</td>
+      </tr>
+
+      <tr>
+        <th>連番</th>
+        <td>${result.info.consecutive}組</td>
+      </tr>
+
+      <tr>
+        <th>合計</th>
+        <td>${result.info.sum}</td>
+      </tr>
+
+      <tr>
+        <th>奇数/偶数</th>
+        <td>${result.info.odd}/${5-result.info.odd}</td>
+      </tr>
+
+      <tr>
+        <th>1～15/16～31</th>
+        <td>${result.info.low}/${5-result.info.low}</td>
+      </tr>
+
+      <tr>
+        <th>数字区分数</th>
+        <td>${result.info.zones}</td>
+      </tr>
+
+    </table>
+
+    <p>
+      <b>検証：</b>
+      ${esc(result.summary)}
+    </p>`;
+
+
+  renderHistory();
+
+}
+
+
+$("csvFile").addEventListener(
+  "change",
+  async e=>{
+
+    const file=
+      e.target.files[0];
+
+    if(!file)
+      return;
+
+
+    try{
+
+      const text=
+        await file.text();
+
+
+      draws=
+        parseCSV(text);
+
+
+      if(draws.length<20)
+
+        throw new Error(
+          "20回分以上の有効なデータが必要です。"
+        );
+
+
+      $("dataStatus").innerHTML=
+
+        `<span class="ok">
+          ${draws.length}回分のデータを読み込み済み
+        </span>`;
+
+
+      $("calcBtn").disabled=false;
+
+      $("verifyBtn").disabled=false;
+
+      renderLastCompare();
+
+      renderHistory();
+
+
+    }catch(err){
+
+      draws=[];
+
+      $("dataStatus").innerHTML=
+
+        `<span class="err">
+          ${esc(err.message)}
+        </span>`;
+
+      $("calcBtn").disabled=true;
+
+      $("verifyBtn").disabled=true;
+
+    }
+
+  }
+);
+
+
+$("calcBtn").addEventListener(
+  "click",
+  ()=>{
+
+    if(draws.length<20)
+      return;
+
+
+    const key=
+      periodKey();
+
+
+    const st=
+      loadState();
+
+
+    // 同じ火曜日19時期間なら数字を変えない
+    if(
+      st &&
+      st.period===key &&
+      st.prediction
+    ){
+
+      renderTicket();
+
+      renderLastCompare();
+
+      return;
+
+    }
+
+
+    const result=
+      makeCandidate(draws);
+
+
+    if(!result){
+
+      $("ticket").textContent=
+        "候補なし";
+
+      return;
+
+    }
+
+
+    const state={
+
+      period:key,
+
+      sourceRound:
+        draws[0].round,
+
+      prediction:
+        result.numbers,
+
+      score:
+        result.info.score,
+
+      info:
+        result.info,
+
+      relaxed:
+        result.relaxed,
+
+      createdAt:
+        new Date().toISOString()
+
+    };
+
+
+    saveState(state);
+
+    renderTicket();
+
+    renderLastCompare();
+
+  }
+);
+
+
+$("verifyBtn").addEventListener(
+  "click",
+  verify
+);
+
+
+renderTicket();
+
+renderHistory();
+
+
+if("serviceWorker" in navigator){
+
+  navigator.serviceWorker
+    .register("./sw.js")
+    .catch(()=>{});
+
+}
+
+</script>
+
+</body>
+</html>
